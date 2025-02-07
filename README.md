@@ -8,7 +8,7 @@ X1Coin is an **ERC-20 token** designed for the X1 racing ecosystem, featuring a 
 - **Comprehensive test suite** ensuring contract correctness and security.
 
 ## Features
-### ✅ X1Coin (ERC-20 Token)
+###  X1Coin (ERC-20 Token)
 - **Fixed supply of 1 billion X1Coins**.
 - **Token distribution**:
   - **50% Public Sale**.
@@ -17,7 +17,7 @@ X1Coin is an **ERC-20 token** designed for the X1 racing ecosystem, featuring a 
 - **Team tokens have a 6-month lock** before they can be transferred.
 - **Minting mechanism for staking rewards**.
 
-### ✅ Staking Contract
+###  Staking Contract
 - **Users can stake X1Coin** and earn rewards.
 - **Fixed annual reward rate of 10%**.
 - **Bonus reward multipliers**:
