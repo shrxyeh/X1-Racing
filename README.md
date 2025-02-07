@@ -91,9 +91,13 @@ forge test
 ## Deployment Logs
 == Logs ==
   Deployment completed successfully:
+  
   X1Coin deployed to: 0x68B1D87F95878fE05B998F19b66F4baba5De1aed
+  
   Staking contract deployed to: 0x3Aa5ebB10DC797CAC828524e59A333d0A371443c
+  
   Team wallet set to: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+  
   Community wallet set to: 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
 
 ## Setting up 1 EVM.
