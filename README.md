@@ -34,7 +34,7 @@ X1Coin is an **ERC-20 token** designed for the X1 racing ecosystem, featuring a 
 
 ### **1️⃣ Setup**
 ```sh
-git clone [<repo_url>](https://github.com/shrxyeh/X1-Racing.git)
+git clone https://github.com/shrxyeh/X1-Racing.git
 cd X1-Racing
 make install
 forge build
