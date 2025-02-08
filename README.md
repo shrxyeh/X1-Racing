@@ -70,7 +70,6 @@ Run unit tests using Foundry:
 ```sh
 forge test
 ```
-## Deployment Information
 ## Deployment Logs
 == Logs ==
   Deployment completed successfully:
