@@ -11,86 +11,78 @@ import {X1Staking} from "../src/X1Staking.sol";
  * @dev Script for deploying X1Coin and X1Staking contracts.
  */
 contract DeployX1Coin is Script {
+    /// @notice Error thrown when an invalid address is provided.
     error InvalidAddress();
-    error DeploymentFailed();
-    error MissingEnvironmentVariable(string varName);
 
     /// @notice Emitted when the deployment is successful.
-    /// @param x1Coin Address of the deployed X1Coin contract.
-    /// @param staking Address of the deployed X1Staking contract.
+    /// @param x1CoinAddress Address of the deployed X1Coin contract.
+    /// @param stakingAddress Address of the deployed X1Staking contract.
     /// @param teamWallet Address of the team wallet.
     /// @param communityWallet Address of the community wallet.
-    event DeploymentComplete(address x1Coin, address staking, address teamWallet, address communityWallet);
+    event DeploymentComplete(
+        address x1CoinAddress,
+        address stakingAddress,
+        address teamWallet,
+        address communityWallet
+    );
 
     /**
      * @notice Executes the deployment process.
-     * @dev Deploys X1Coin and X1Staking contracts and sets up initial configurations.
+     * @dev Deploys X1Coin and X1Staking contracts, sets up the staking contract,
+     *      and initializes the X1Coin contract for token distribution.
+     * @return x1coin The deployed X1Coin contract instance.
+     * @return staking The deployed X1Staking contract instance.
      */
-    function run() external {
-        try vm.envUint("PRIVATE_KEY") returns (uint256 deployerPrivateKey) {
-            address teamWallet;
-            address communityWallet;
+    function run() public returns (X1Coin, X1Staking) {
+        // Retrieve deployment parameters from environment variables
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address teamWallet = vm.envAddress("TEAM_WALLET");
+        address communityWallet = vm.envAddress("COMMUNITY_WALLET");
+        address publicSaleContract = vm.envAddress("PUBLIC_SALE_CONTRACT");
 
-            try vm.envAddress("TEAM_WALLET") returns (address _teamWallet) {
-                teamWallet = _teamWallet;
-            } catch {
-                console.log("TEAM_WALLET environment variable not set");
-                revert MissingEnvironmentVariable("TEAM_WALLET");
-            }
-
-            try vm.envAddress("COMMUNITY_WALLET") returns (address _communityWallet) {
-                communityWallet = _communityWallet;
-            } catch {
-                console.log("COMMUNITY_WALLET environment variable not set");
-                revert MissingEnvironmentVariable("COMMUNITY_WALLET");
-            }
-
-            // Validate addresses
-            if (teamWallet == address(0) || communityWallet == address(0)) {
-                console.log("Invalid wallet addresses");
-                revert InvalidAddress();
-            }
-
-            vm.startBroadcast(deployerPrivateKey);
-
-            // Deploy X1Coin
-            X1Coin x1coin = new X1Coin();
-            if (address(x1coin) == address(0)) {
-                revert DeploymentFailed();
-            }
-
-            // Deploy X1Staking contract
-            X1Staking staking = new X1Staking(address(x1coin));
-            if (address(staking) == address(0)) {
-                revert DeploymentFailed();
-            }
-
-            // Configure X1Coin
-            x1coin.setTeamWallet(teamWallet);
-            x1coin.setCommunityWallet(communityWallet);
-            x1coin.setStakingContract(address(staking));
-
-            // Initialize token distribution
-            x1coin.distributeTokens();
-
-            vm.stopBroadcast();
-
-            // Log deployment details
-            console.log("Deployment completed successfully:");
-            console.log("X1Coin deployed to:", address(x1coin));
-            console.log("Staking contract deployed to:", address(staking));
-            console.log("Team wallet set to:", teamWallet);
-            console.log("Community wallet set to:", communityWallet);
-
-            emit DeploymentComplete(address(x1coin), address(staking), teamWallet, communityWallet);
-        } catch {
-            console.log("PRIVATE_KEY environment variable not set");
-            revert MissingEnvironmentVariable("PRIVATE_KEY");
+        // Validate that required addresses are not zero
+        if (
+            teamWallet == address(0) ||
+            communityWallet == address(0) ||
+            publicSaleContract == address(0)
+        ) {
+            revert InvalidAddress();
         }
+
+        vm.startBroadcast(deployerPrivateKey);
+
+        // Deploy the X1Coin contract
+        X1Coin x1coin = new X1Coin(
+            teamWallet,
+            communityWallet,
+            publicSaleContract
+        );
+
+        // Deploy the X1Staking contract
+        X1Staking staking = new X1Staking(address(x1coin));
+
+        // Link the staking contract with the X1Coin contract
+        x1coin.setStakingContract(address(staking));
+
+        // Initialize X1Coin to distribute tokens (ensuring it is ready for use)
+        x1coin.initialize();
+
+        // Emit event confirming successful deployment
+        emit DeploymentComplete(
+            address(x1coin),
+            address(staking),
+            teamWallet,
+            communityWallet
+        );
+
+        vm.stopBroadcast();
+
+        return (x1coin, staking);
     }
 
     /**
      * @notice Validates the deployment by checking contract configurations.
+     * @dev Ensures that X1Coin and X1Staking contracts are correctly linked and initialized.
      * @param x1CoinAddress The address of the deployed X1Coin contract.
      * @param stakingAddress The address of the deployed X1Staking contract.
      * @param teamWallet The expected team wallet address.
@@ -102,15 +94,13 @@ contract DeployX1Coin is Script {
         address stakingAddress,
         address teamWallet,
         address communityWallet
-    ) external view returns (bool) {
+    ) public view returns (bool) {
         X1Coin x1coin = X1Coin(x1CoinAddress);
         X1Staking staking = X1Staking(stakingAddress);
 
-        require(x1coin.teamWallet() == teamWallet, "Invalid team wallet");
-        require(x1coin.communityWallet() == communityWallet, "Invalid community wallet");
-        require(x1coin.stakingContract() == stakingAddress, "Invalid staking contract");
-        require(address(staking.x1Token()) == x1CoinAddress, "Invalid token address in staking");
-
-        return true;
+        return (address(staking.x1Token()) == x1CoinAddress &&
+            x1coin.teamWallet() == teamWallet &&
+            x1coin.communityWallet() == communityWallet &&
+            x1coin.stakingContract() == stakingAddress);
     }
 }
