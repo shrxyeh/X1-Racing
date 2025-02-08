@@ -8,7 +8,7 @@ X1Coin is an **ERC-20 token** designed for the X1 racing ecosystem, featuring a 
 - **Comprehensive test suite** ensuring contract correctness and security.
 
 ## Features
-###  X1Coin (ERC-20 Token)
+### ✅ X1Coin (ERC-20 Token)
 - **Fixed supply of 1 billion X1Coins**.
 - **Token distribution**:
   - **50% Public Sale**.
@@ -17,7 +17,7 @@ X1Coin is an **ERC-20 token** designed for the X1 racing ecosystem, featuring a 
 - **Team tokens have a 6-month lock** before they can be transferred.
 - **Minting mechanism for staking rewards**.
 
-###  Staking Contract
+### ✅ Staking Contract
 - **Users can stake X1Coin** and earn rewards.
 - **Fixed annual reward rate of 10%**.
 - **Bonus reward multipliers**:
@@ -34,8 +34,8 @@ X1Coin is an **ERC-20 token** designed for the X1 racing ecosystem, featuring a 
 
 ### **1️⃣ Setup**
 ```sh
-git clone https://github.com/shrxyeh/X1-Racing.git
-cd X1-Racing
+git clone <repo_url>
+cd X1-Racing$
 make install
 forge build
 ```
@@ -51,6 +51,7 @@ Create a `.env` file and define:
 PRIVATE_KEY=<your_private_key>
 TEAM_WALLET=<team_wallet_address>
 COMMUNITY_WALLET=<community_wallet_address>
+PUBLIC_SALE_CONTRACT=<public_sale_contract_address>
 ```
 
 ### **4️⃣ Deploy Contracts**
@@ -63,24 +64,6 @@ For deploying staking separately:
 forge script script/DeployX1Staking.s.sol --fork-url <RPC_URL> --private-key $PRIVATE_KEY --broadcast
 ```
 
-## Usage
-### **Staking X1Coin**
-1. Approve the staking contract to spend your tokens:
-   ```solidity
-   x1Coin.approve(stakingContract, amount);
-   ```
-2. Stake tokens:
-   ```solidity
-   staking.stake(amount);
-   ```
-3. Unstake after **30 days**:
-   ```solidity
-   staking.unstake();
-   ```
-4. Check rewards:
-   ```solidity
-   staking.getStakeInfo(userAddress);
-   ```
 
 ## Testing
 Run unit tests using Foundry:
@@ -91,13 +74,9 @@ forge test
 ## Deployment Logs
 == Logs ==
   Deployment completed successfully:
-  
   X1Coin deployed to: 0x68B1D87F95878fE05B998F19b66F4baba5De1aed
-  
   Staking contract deployed to: 0x3Aa5ebB10DC797CAC828524e59A333d0A371443c
-  
   Team wallet set to: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-  
   Community wallet set to: 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
 
 ## Setting up 1 EVM.
