@@ -10,6 +10,12 @@ contract X1CoinTest is Test {
     address public owner;
     address public teamWallet;
     address public communityWallet;
+    address public publicSaleContract;
+    address public stakingContract;
+
+    uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18;
+    uint256 public constant STAKING_REWARDS_AMOUNT = (TOTAL_SUPPLY * 5) / 100; // 5% of total supply
+    uint256 public constant MAX_ANNUAL_REWARDS = (TOTAL_SUPPLY * 1) / 100; // 1% of total supply
 
     /**
      * @dev Set up function runs before each test case.
@@ -19,23 +25,141 @@ contract X1CoinTest is Test {
         owner = address(this);
         teamWallet = address(0x1);
         communityWallet = address(0x2);
+        publicSaleContract = address(0x3);
+        stakingContract = address(0x4);
 
         vm.startPrank(owner);
-        x1coin = new X1Coin();
+        x1coin = new X1Coin(teamWallet, communityWallet, publicSaleContract);
+        x1coin.setStakingContract(stakingContract);
+        vm.stopPrank();
+    }
 
-        x1coin.setTeamWallet(teamWallet); // Assign team wallet
+    function testRewardInflationPrevention() public {
+        vm.startPrank(owner);
+        x1coin.initialize();
+        vm.stopPrank();
+
+        vm.startPrank(stakingContract);
+
+        // Test 1: Initial mint within limits
+        uint256 initialMint = STAKING_REWARDS_AMOUNT / 2;
+        x1coin.mintRewards(address(0x7), initialMint);
+        assertEq(
+            x1coin.totalTokensMinted(),
+            initialMint,
+            "Initial mint should be recorded"
+        );
+
+        // Test 2: Try to exceed total staking rewards allocation
+        vm.expectRevert("Exceeds staking rewards allocation");
+        x1coin.mintRewards(address(0x7), STAKING_REWARDS_AMOUNT + 1);
+
+        // Test 3: Test approaching the cap
+        uint256 remainingAllocation = STAKING_REWARDS_AMOUNT - initialMint;
+        if (remainingAllocation > 0) {
+            x1coin.mintRewards(address(0x8), remainingAllocation - 1);
+
+            // Should fail when trying to mint even 1 more token
+            vm.expectRevert("Exceeds staking rewards allocation");
+            x1coin.mintRewards(address(0x8), 2);
+        }
 
         vm.stopPrank();
-        x1coin.setCommunityWallet(communityWallet);
+    }
+
+    function testRewardMintingAccessControl() public {
+        vm.startPrank(owner);
+        x1coin.initialize();
+        vm.stopPrank();
+
+        // Test non-staking contract address trying to mint
+        address nonStakingContract = address(0x9);
+        vm.prank(nonStakingContract);
+        vm.expectRevert("Only staking contract can call");
+        x1coin.mintRewards(address(0x7), 1000);
+
+        // Test owner cannot mint rewards
+        vm.prank(owner);
+        vm.expectRevert("Only staking contract can call");
+        x1coin.mintRewards(address(0x7), 1000);
+
+        // Test regular user cannot mint rewards
+        vm.prank(address(0x10));
+        vm.expectRevert("Only staking contract can call");
+        x1coin.mintRewards(address(0x7), 1000);
+
+        // Verify staking contract can still mint within limits
+        vm.prank(stakingContract);
+        x1coin.mintRewards(address(0x7), 1000);
+        assertEq(
+            x1coin.balanceOf(address(0x7)),
+            1000,
+            "Staking contract should be able to mint"
+        );
+    }
+
+    function testAnnualRewardReset() public {
+        vm.startPrank(owner);
+        x1coin.initialize();
+        vm.stopPrank();
+
+        vm.startPrank(stakingContract);
+
+        // Mint some rewards
+        uint256 initialMint = MAX_ANNUAL_REWARDS / 2;
+        x1coin.mintRewards(address(0x7), initialMint);
+
+        // Fast forward 1 year
+        vm.warp(block.timestamp + 365 days);
+
+        // Should be able to mint up to MAX_ANNUAL_REWARDS again
+        x1coin.mintRewards(address(0x8), initialMint);
+
+        // Verify total minted is still tracked correctly
+        assertEq(
+            x1coin.totalStakingRewardsMinted(),
+            initialMint * 2,
+            "Total minted should accumulate"
+        );
+
+        vm.stopPrank();
+    }
+
+    function testRewardMintingPrecision() public {
+        vm.startPrank(owner);
+        x1coin.initialize();
+        vm.stopPrank();
+
+        vm.startPrank(stakingContract);
+
+        // Test minting small amounts
+        uint256 smallAmount = 1;
+        x1coin.mintRewards(address(0x7), smallAmount);
+        assertEq(
+            x1coin.balanceOf(address(0x7)),
+            smallAmount,
+            "Should handle small amounts"
+        );
+
+        // Test minting max possible amount
+        uint256 remainingRewards = STAKING_REWARDS_AMOUNT - smallAmount;
+        x1coin.mintRewards(address(0x7), remainingRewards);
+        assertEq(
+            x1coin.balanceOf(address(0x7)),
+            STAKING_REWARDS_AMOUNT,
+            "Should handle max amount"
+        );
+
+        vm.stopPrank();
     }
 
     /**
      * @dev Tests whether token details are correctly initialized.
      */
     function testInitialSupplyAndTokenDetails() public view {
-        assertEq(x1coin.name(), "X1Coin"); // Check token name
-        assertEq(x1coin.symbol(), "X1C"); // Check token symbol
-        assertEq(x1coin.totalSupply(), uint256(0), "Initial total supply should be 0");
+        assertEq(x1coin.name(), "X1Coin");
+        assertEq(x1coin.symbol(), "X1C");
+        assertEq(x1coin.totalSupply(), uint256(0));
     }
 
     /**
@@ -43,18 +167,26 @@ contract X1CoinTest is Test {
      */
     function testTokenDistribution() public {
         vm.prank(owner);
-        x1coin.distributeTokens(); // Distribute tokens
+        x1coin.initialize();
 
-        // Retrieve expected token distribution amounts
         uint256 publicSaleAmount = x1coin.PUBLIC_SALE_AMOUNT();
         uint256 teamAmount = x1coin.TEAM_ADVISORS_AMOUNT();
         uint256 communityAmount = x1coin.COMMUNITY_DEVELOPMENT_AMOUNT();
 
-        // Validate balances after distribution
-        assertEq(x1coin.balanceOf(owner), publicSaleAmount, "Owner should receive public sale tokens");
-        assertEq(x1coin.balanceOf(teamWallet), teamAmount, "Team wallet should receive team tokens");
         assertEq(
-            x1coin.balanceOf(communityWallet), communityAmount, "Community wallet should receive development tokens"
+            x1coin.balanceOf(publicSaleContract),
+            publicSaleAmount,
+            "Public sale contract should receive public sale tokens"
+        );
+        assertEq(
+            x1coin.balanceOf(teamWallet),
+            teamAmount,
+            "Team wallet should receive team tokens"
+        );
+        assertEq(
+            x1coin.balanceOf(communityWallet),
+            communityAmount,
+            "Community wallet should receive development tokens"
         );
     }
 
@@ -62,27 +194,32 @@ contract X1CoinTest is Test {
      * @dev Tests prevention of multiple distributions.
      */
     function testPreventDoubleDistribution() public {
-        vm.prank(owner);
-        x1coin.distributeTokens();
-        uint256 deployerBalance = x1coin.balanceOf(owner);
-        assertTrue(deployerBalance > 0, "Tokens should be distributed first");
+        vm.startPrank(owner);
 
-        vm.prank(owner);
-        vm.expectRevert("Tokens already distributed"); // Expect an error if distributing again
-        x1coin.distributeTokens();
+        x1coin.initialize();
+
+        uint256 publicSaleBalance = x1coin.balanceOf(publicSaleContract);
+        assertTrue(publicSaleBalance > 0, "Tokens should be distributed first");
+
+        vm.expectRevert("Already initialized");
+        x1coin.initialize();
+
+        vm.stopPrank();
     }
 
     /**
      * @dev Ensures setting wallet addresses to zero is prevented.
      */
-    function testSetWalletsWithZeroAddress() public {
-        vm.prank(owner);
+    function testFailSetWalletsWithZeroAddress() public {
+        vm.startPrank(owner);
+
         vm.expectRevert("Invalid team wallet address");
         x1coin.setTeamWallet(address(0));
 
-        vm.prank(owner);
         vm.expectRevert("Invalid community wallet address");
         x1coin.setCommunityWallet(address(0));
+
+        vm.stopPrank();
     }
 
     /**
@@ -90,18 +227,26 @@ contract X1CoinTest is Test {
      */
     function testTeamLock() public {
         vm.prank(owner);
-        x1coin.distributeTokens();
+        x1coin.initialize();
+
+        address targetAddress = address(0x3);
+        uint256 initialBalance = x1coin.balanceOf(targetAddress);
 
         vm.prank(teamWallet);
         vm.expectRevert("Team tokens are locked");
-        x1coin.transferFromTeam(address(0x3), 1000);
+        x1coin.transferFromTeam(targetAddress, 1000);
 
-        // Fast forward 6 months (180 days)
         vm.warp(block.timestamp + 180 days);
 
         vm.prank(teamWallet);
-        x1coin.transferFromTeam(address(0x3), 1000);
-        assertEq(x1coin.balanceOf(address(0x3)), 1000, "Transfer should succeed after lock period");
+        uint256 transferAmount = 1000;
+        x1coin.transferFromTeam(targetAddress, transferAmount);
+
+        assertEq(
+            x1coin.balanceOf(targetAddress),
+            initialBalance + transferAmount,
+            "Transfer should increase balance by exact amount"
+        );
     }
 
     /**
@@ -109,7 +254,7 @@ contract X1CoinTest is Test {
      */
     function testTeamTokenTransferBeforeLockPeriod() public {
         vm.prank(owner);
-        x1coin.distributeTokens();
+        x1coin.initialize();
 
         address randomUser = address(0x4);
         vm.prank(teamWallet);
@@ -122,17 +267,20 @@ contract X1CoinTest is Test {
      */
     function testTeamTokenTransferAfterLockPeriod() public {
         vm.prank(owner);
-        x1coin.distributeTokens();
+        x1coin.initialize();
         address randomUser = address(0x5);
 
-        // Simulate time passing (181 days, beyond the lock period)
         vm.warp(block.timestamp + 181 days);
 
         uint256 transferAmount = 500 * 10 ** 18;
         vm.prank(teamWallet);
         x1coin.transferFromTeam(randomUser, transferAmount);
 
-        assertEq(x1coin.balanceOf(randomUser), transferAmount, "Transfer should succeed after lock period");
+        assertEq(
+            x1coin.balanceOf(randomUser),
+            transferAmount,
+            "Transfer should succeed after lock period"
+        );
     }
 
     /**
@@ -140,7 +288,7 @@ contract X1CoinTest is Test {
      */
     function testOnlyTeamWalletCanTransfer() public {
         vm.prank(owner);
-        x1coin.distributeTokens();
+        x1coin.initialize();
         address randomUser = address(0x6);
 
         vm.warp(block.timestamp + 181 days);
@@ -154,31 +302,28 @@ contract X1CoinTest is Test {
      * @dev Tests setting the staking contract address.
      */
     function testSetStakingContract() public {
-        address stakingContract = makeAddr("stakingContract");
-
         vm.prank(owner);
         x1coin.setStakingContract(stakingContract);
 
-        assertEq(x1coin.stakingContract(), stakingContract, "Staking contract should be set correctly");
+        assertEq(
+            x1coin.stakingContract(),
+            stakingContract,
+            "Staking contract should be set correctly"
+        );
     }
 
     /**
      * @dev Ensures only the staking contract can mint reward tokens.
      */
     function testOnlyStakingContractCanMintRewards() public {
-        address stakingContract = makeAddr("stakingContract");
-        address randomUser = address(0x7);
-
         vm.prank(owner);
         x1coin.setStakingContract(stakingContract);
 
-        // Success case: staking contract should be able to mint rewards
         vm.prank(stakingContract);
-        x1coin.mintRewards(randomUser, 1000);
+        x1coin.mintRewards(address(0x7), 1000);
 
-        // Failure case: a random user should not be able to mint rewards
-        vm.prank(randomUser);
-        vm.expectRevert("Only staking contract can mint rewards");
-        x1coin.mintRewards(randomUser, 1000);
+        vm.prank(address(0x7));
+        vm.expectRevert("Only staking contract can call");
+        x1coin.mintRewards(address(0x7), 1000);
     }
 }
