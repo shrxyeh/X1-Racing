@@ -17,6 +17,7 @@ contract DeployX1CoinTest is Test {
     address public owner;
     address public teamWallet;
     address public communityWallet;
+    address public publicSaleContract;
     uint256 public privateKey;
 
     /**
@@ -34,6 +35,7 @@ contract DeployX1CoinTest is Test {
         owner = vm.addr(privateKey);
         teamWallet = address(0x1);
         communityWallet = address(0x2);
+        publicSaleContract = address(0x3);
 
         vm.resetNonce(owner);
         vm.deal(owner, 100 ether);
@@ -48,6 +50,7 @@ contract DeployX1CoinTest is Test {
         vm.setEnv("PRIVATE_KEY", vm.toString(privateKey));
         vm.setEnv("TEAM_WALLET", vm.toString(teamWallet));
         vm.setEnv("COMMUNITY_WALLET", vm.toString(communityWallet));
+        vm.setEnv("PUBLIC_SALE_CONTRACT", vm.toString(publicSaleContract));
     }
 
     /**
@@ -56,9 +59,26 @@ contract DeployX1CoinTest is Test {
     function testDeploymentScript() public {
         _setEnvironmentVariables();
 
-        assertEq(vm.envUint("PRIVATE_KEY"), privateKey, "PRIVATE_KEY not set correctly");
-        assertEq(vm.envAddress("TEAM_WALLET"), teamWallet, "TEAM_WALLET not set correctly");
-        assertEq(vm.envAddress("COMMUNITY_WALLET"), communityWallet, "COMMUNITY_WALLET not set correctly");
+        assertEq(
+            vm.envUint("PRIVATE_KEY"),
+            privateKey,
+            "PRIVATE_KEY not set correctly"
+        );
+        assertEq(
+            vm.envAddress("TEAM_WALLET"),
+            teamWallet,
+            "TEAM_WALLET not set correctly"
+        );
+        assertEq(
+            vm.envAddress("COMMUNITY_WALLET"),
+            communityWallet,
+            "COMMUNITY_WALLET not set correctly"
+        );
+        assertEq(
+            vm.envAddress("PUBLIC_SALE_CONTRACT"),
+            publicSaleContract,
+            "PUBLIC_SALE_CONTRACT not set correctly"
+        );
 
         try deployer.run() {
             assertTrue(true);
@@ -95,14 +115,19 @@ contract DeployX1CoinTest is Test {
         deployer.run();
 
         Vm.Log[] memory entries = vm.getRecordedLogs();
-        bytes32 deploymentTopic = keccak256("DeploymentComplete(address,address,address,address)");
+        bytes32 deploymentTopic = keccak256(
+            "DeploymentComplete(address,address,address,address)"
+        );
         address x1CoinAddress;
         address stakingAddress;
         bool found = false;
 
         for (uint256 i = 0; i < entries.length; i++) {
             if (entries[i].topics[0] == deploymentTopic) {
-                (x1CoinAddress, stakingAddress,,) = abi.decode(entries[i].data, (address, address, address, address));
+                (x1CoinAddress, stakingAddress, , ) = abi.decode(
+                    entries[i].data,
+                    (address, address, address, address)
+                );
                 found = true;
                 break;
             }
@@ -112,16 +137,38 @@ contract DeployX1CoinTest is Test {
         require(x1CoinAddress != address(0), "X1Coin address is zero");
         require(stakingAddress != address(0), "Staking address is zero");
 
-        bool isValid = deployer.validateDeployment(x1CoinAddress, stakingAddress, teamWallet, communityWallet);
+        bool isValid = deployer.validateDeployment(
+            x1CoinAddress,
+            stakingAddress,
+            teamWallet,
+            communityWallet
+        );
         assertTrue(isValid, "Deployment validation failed");
 
         X1Coin x1coin = X1Coin(x1CoinAddress);
         X1Staking staking = X1Staking(stakingAddress);
 
-        assertEq(address(staking.x1Token()), x1CoinAddress, "Invalid token address in staking");
+        assertEq(
+            address(staking.x1Token()),
+            x1CoinAddress,
+            "Invalid token address in staking"
+        );
         assertEq(x1coin.teamWallet(), teamWallet, "Invalid team wallet");
-        assertEq(x1coin.communityWallet(), communityWallet, "Invalid community wallet");
-        assertEq(x1coin.stakingContract(), stakingAddress, "Invalid staking contract");
+        assertEq(
+            x1coin.communityWallet(),
+            communityWallet,
+            "Invalid community wallet"
+        );
+        assertEq(
+            x1coin.stakingContract(),
+            stakingAddress,
+            "Invalid staking contract"
+        );
+        assertEq(
+            x1coin.publicSaleContract(),
+            publicSaleContract,
+            "Invalid public sale contract"
+        );
     }
 
     /**
@@ -133,14 +180,19 @@ contract DeployX1CoinTest is Test {
         deployer.run();
 
         Vm.Log[] memory entries = vm.getRecordedLogs();
-        bytes32 deploymentTopic = keccak256("DeploymentComplete(address,address,address,address)");
+        bytes32 deploymentTopic = keccak256(
+            "DeploymentComplete(address,address,address,address)"
+        );
         address x1CoinAddress;
         address stakingAddress;
         bool found = false;
 
         for (uint256 i = 0; i < entries.length; i++) {
             if (entries[i].topics[0] == deploymentTopic) {
-                (x1CoinAddress, stakingAddress,,) = abi.decode(entries[i].data, (address, address, address, address));
+                (x1CoinAddress, stakingAddress, , ) = abi.decode(
+                    entries[i].data,
+                    (address, address, address, address)
+                );
                 found = true;
                 break;
             }
@@ -154,17 +206,46 @@ contract DeployX1CoinTest is Test {
         X1Staking staking = X1Staking(stakingAddress);
 
         assertEq(x1coin.teamWallet(), teamWallet, "Invalid team wallet");
-        assertEq(x1coin.communityWallet(), communityWallet, "Invalid community wallet");
-        assertEq(x1coin.stakingContract(), stakingAddress, "Invalid staking contract");
-        assertEq(address(staking.x1Token()), x1CoinAddress, "Invalid token address in staking");
+        assertEq(
+            x1coin.communityWallet(),
+            communityWallet,
+            "Invalid community wallet"
+        );
+        assertEq(
+            x1coin.stakingContract(),
+            stakingAddress,
+            "Invalid staking contract"
+        );
+        assertEq(
+            x1coin.publicSaleContract(),
+            publicSaleContract,
+            "Invalid public sale contract"
+        );
+        assertEq(
+            address(staking.x1Token()),
+            x1CoinAddress,
+            "Invalid token address in staking"
+        );
 
         uint256 TOTAL_SUPPLY = x1coin.TOTAL_SUPPLY();
         uint256 publicSaleAmount = (TOTAL_SUPPLY * 50) / 100;
         uint256 teamAmount = (TOTAL_SUPPLY * 30) / 100;
         uint256 communityAmount = (TOTAL_SUPPLY * 20) / 100;
 
-        assertEq(x1coin.balanceOf(owner), publicSaleAmount, "Invalid public sale amount");
-        assertEq(x1coin.balanceOf(teamWallet), teamAmount, "Invalid team amount");
-        assertEq(x1coin.balanceOf(communityWallet), communityAmount, "Invalid community amount");
+        assertEq(
+            x1coin.balanceOf(publicSaleContract),
+            publicSaleAmount,
+            "Invalid public sale amount"
+        );
+        assertEq(
+            x1coin.balanceOf(teamWallet),
+            teamAmount,
+            "Invalid team amount"
+        );
+        assertEq(
+            x1coin.balanceOf(communityWallet),
+            communityAmount,
+            "Invalid community amount"
+        );
     }
 }
