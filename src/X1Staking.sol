@@ -21,26 +21,30 @@ contract X1Staking is ReentrancyGuard {
     }
 
     X1Coin public immutable x1Token;
-    address public owner;
 
-    // Staking configuration parameters
     uint256 public constant MINIMUM_STAKING_PERIOD = 30 days;
     uint256 public constant BASE_ANNUAL_REWARD_RATE = 10; // 10% base rate
     uint256 public constant REWARD_PRECISION = 1e18;
-    uint256 public constant MAX_REWARD_MULTIPLIER = 2; // Maximum 2x rewards for long-term staking
+    uint256 public constant MAX_REWARD_MULTIPLIER = 2; // Maximum 2x rewards
 
-    // Staking tiers with reward multipliers
-    uint256[3] public stakingTiers = [
-        90 days, // Tier 1: 1.25x rewards
-        180 days, // Tier 2: 1.5x rewards
-        365 days // Tier 3: 2x rewards
-    ];
-    uint256[4] public rewardMultipliers = [
-        1000, // Base: 1x
-        1250, // Tier 1: 1.25x
-        1500, // Tier 2: 1.5x
-        2000 // Tier 3: 2x
-    ];
+    // Reward caps aligned with total supply (5% of total supply for rewards)
+    uint256 public constant MAX_TOTAL_REWARDS = 50_000_000 * 1e18; // 50M tokens max total rewards (5% of total supply)
+    uint256 public constant MAX_ANNUAL_REWARDS = 10_000_000 * 1e18; // 10M tokens max annual rewards (1% of total supply)
+
+    uint256 public totalRewardsMinted;
+    uint256 public annualRewardsMinted;
+    uint256 public lastAnnualResetTime;
+    uint256 public lastRewardCalculationTimestamp;
+
+    // Reward rate decay parameters
+    uint256 public constant REWARD_REDUCTION_PERIOD = 365 days;
+    uint256 public constant REWARD_REDUCTION_RATE = 25; // 25% reduction per year
+    uint256 public rewardRateMultiplier = 100; // Starts at 100% (scaled by 100)
+    uint256 public lastRewardRateUpdateTime;
+
+    // Rward staking tiers
+    uint256[3] public stakingTiers = [90 days, 180 days, 365 days];
+    uint256[4] public rewardMultipliers = [1000, 1250, 1500, 2000];
 
     mapping(address => Stake) public stakes;
     uint256 public totalStakedTokens;
@@ -49,6 +53,8 @@ contract X1Staking is ReentrancyGuard {
     event Unstaked(address indexed user, uint256 amount, uint256 rewards);
     event RewardClaimed(address indexed user, uint256 amount);
     event RewardsReinvested(address indexed user, uint256 amount);
+    event AnnualRewardsReset(uint256 timestamp);
+    event RewardRateUpdated(uint256 newRate);
 
     /**
      * @dev Constructor initializes the staking contract.
@@ -57,7 +63,38 @@ contract X1Staking is ReentrancyGuard {
     constructor(address _x1Token) {
         require(_x1Token != address(0), "Invalid token address");
         x1Token = X1Coin(_x1Token);
-        owner = msg.sender;
+        lastRewardCalculationTimestamp = block.timestamp;
+        lastAnnualResetTime = block.timestamp;
+        lastRewardRateUpdateTime = block.timestamp;
+    }
+
+    /**
+     * @notice Updates the reward rate multiplier based on time elapsed since last update.
+     */
+
+    function updateRewardRate() internal {
+        uint256 timeElapsed = block.timestamp - lastRewardRateUpdateTime;
+        if (timeElapsed >= REWARD_REDUCTION_PERIOD) {
+            uint256 periods = timeElapsed / REWARD_REDUCTION_PERIOD;
+            for (uint256 i = 0; i < periods; i++) {
+                rewardRateMultiplier =
+                    (rewardRateMultiplier * (100 - REWARD_REDUCTION_RATE)) /
+                    100;
+            }
+            lastRewardRateUpdateTime = block.timestamp;
+            emit RewardRateUpdated(rewardRateMultiplier);
+        }
+    }
+
+    /**
+     * @notice Resets annual rewards tracking if a year has passed
+     */
+    function _checkAndResetAnnualRewards() internal {
+        if (block.timestamp >= lastAnnualResetTime + 365 days) {
+            annualRewardsMinted = 0;
+            lastAnnualResetTime = block.timestamp;
+            emit AnnualRewardsReset(block.timestamp);
+        }
     }
 
     /**
@@ -69,7 +106,11 @@ contract X1Staking is ReentrancyGuard {
 
         Stake storage userStake = stakes[msg.sender];
 
-        IERC20(address(x1Token)).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(address(x1Token)).safeTransferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
 
         if (userStake.amount > 0) {
             uint256 pendingRewards = calculatePendingRewards(msg.sender);
@@ -109,19 +150,26 @@ contract X1Staking is ReentrancyGuard {
     function unstake() external nonReentrant {
         Stake storage userStake = stakes[msg.sender];
         require(userStake.amount > 0, "No tokens staked");
-        require(block.timestamp >= userStake.startTimestamp + MINIMUM_STAKING_PERIOD, "Minimum staking period not met");
+        require(
+            block.timestamp >=
+                userStake.startTimestamp + MINIMUM_STAKING_PERIOD,
+            "Minimum staking period not met"
+        );
 
         uint256 pendingRewards = calculatePendingRewards(msg.sender);
         uint256 totalRewards = userStake.accumulatedRewards + pendingRewards;
         uint256 originalStakeAmount = userStake.amount;
 
         totalStakedTokens -= userStake.amount;
-        userStake.amount = 0;
-        userStake.startTimestamp = 0;
-        userStake.lastRewardCalculationTime = 0;
-        userStake.accumulatedRewards = 0;
+        delete stakes[msg.sender];
 
-        x1Token.mintRewards(msg.sender, totalRewards);
+        // Update total rewards minted
+        totalRewardsMinted += totalRewards;
+
+        // Mint rewards and transfer staked tokens
+        if (totalRewards > 0) {
+            x1Token.mintRewards(msg.sender, totalRewards);
+        }
         IERC20(address(x1Token)).safeTransfer(msg.sender, originalStakeAmount);
 
         emit Unstaked(msg.sender, originalStakeAmount, totalRewards);
@@ -129,17 +177,23 @@ contract X1Staking is ReentrancyGuard {
     }
 
     /**
-     * @notice Calculates pending rewards for a user.
-     * @param user Address of the user.
-     * @return The pending reward amount.
+     * @notice Calculates pending rewards for a user with supply caps
+     * @param user Address of the user
+     * @return The pending reward amount
      */
-    function calculatePendingRewards(address user) public view returns (uint256) {
+    function calculatePendingRewards(
+        address user
+    ) public view returns (uint256) {
         Stake storage userStake = stakes[user];
         if (userStake.amount == 0) return 0;
 
-        uint256 timeElapsed = block.timestamp - userStake.lastRewardCalculationTime;
+        uint256 timeElapsed = block.timestamp -
+            userStake.lastRewardCalculationTime;
         uint256 stakingDuration = block.timestamp - userStake.startTimestamp;
 
+        if (stakingDuration == 0) return 0;
+
+        // Get reward multiplier based on staking duration
         uint256 rewardMultiplier = rewardMultipliers[0];
         for (uint256 i = 0; i < stakingTiers.length; i++) {
             if (stakingDuration >= stakingTiers[i]) {
@@ -147,11 +201,54 @@ contract X1Staking is ReentrancyGuard {
             }
         }
 
-        uint256 annualReward =
-            (userStake.amount * BASE_ANNUAL_REWARD_RATE * rewardMultiplier * REWARD_PRECISION) / (100 * 1000);
-        uint256 pendingRewards = (annualReward * timeElapsed) / (365 days * REWARD_PRECISION);
+        // Apply reward rate decay
+        uint256 currentRewardRate = (BASE_ANNUAL_REWARD_RATE *
+            rewardRateMultiplier) / 100;
+
+        // Calculate base rewards with decay
+        uint256 annualReward = (userStake.amount *
+            currentRewardRate *
+            rewardMultiplier *
+            REWARD_PRECISION) / (100 * 1000);
+        uint256 pendingRewards = (annualReward * timeElapsed) /
+            (365 days * REWARD_PRECISION);
+
+        // Check against total rewards cap
+        if (totalRewardsMinted + pendingRewards > MAX_TOTAL_REWARDS) {
+            return 0;
+        }
+
+        // Check against annual rewards cap
+        if (annualRewardsMinted + pendingRewards > MAX_ANNUAL_REWARDS) {
+            return 0;
+        }
 
         return pendingRewards;
+    }
+
+    /**
+     * @notice Claims rewards and updates reward tracking
+     * @param rewards Amount of rewards to claim
+     */
+    function _claimRewards(uint256 rewards) internal {
+        if (rewards == 0) return;
+
+        _checkAndResetAnnualRewards();
+
+        require(
+            totalRewardsMinted + rewards <= MAX_TOTAL_REWARDS,
+            "Exceeds total rewards cap"
+        );
+        require(
+            annualRewardsMinted + rewards <= MAX_ANNUAL_REWARDS,
+            "Exceeds annual rewards cap"
+        );
+
+        totalRewardsMinted += rewards;
+        annualRewardsMinted += rewards;
+        x1Token.mintRewards(msg.sender, rewards);
+
+        emit RewardClaimed(msg.sender, rewards);
     }
 
     /**
@@ -162,23 +259,44 @@ contract X1Staking is ReentrancyGuard {
      * @return pendingRewards The pending reward amount.
      * @return rewardMultiplier The applicable reward multiplier.
      */
-    function getStakeInfo(address user)
+    function getStakeInfo(
+        address user
+    )
         external
         view
-        returns (uint256 amount, uint256 stakingTime, uint256 pendingRewards, uint256 rewardMultiplier)
+        returns (
+            uint256 amount,
+            uint256 stakingTime,
+            uint256 pendingRewards,
+            uint256 rewardMultiplier
+        )
     {
         Stake memory userStake = stakes[user];
         amount = userStake.amount;
         stakingTime = userStake.startTimestamp;
+
+        if (amount == 0 || stakingTime == 0) {
+            return (0, 0, 0, 0);
+        }
+
         pendingRewards = calculatePendingRewards(user);
 
         uint256 stakingDuration = block.timestamp - userStake.startTimestamp;
         uint256 multiplierIndex = 0;
+        if (stakingDuration == 0) {
+            stakingDuration = 1;
+        }
+
         for (uint256 i = 0; i < stakingTiers.length; i++) {
             if (stakingDuration >= stakingTiers[i]) {
                 multiplierIndex = i + 1;
             }
         }
-        rewardMultiplier = rewardMultipliers[multiplierIndex] / 1000.0;
+
+        if (multiplierIndex >= rewardMultipliers.length) {
+            multiplierIndex = rewardMultipliers.length - 1;
+        }
+
+        rewardMultiplier = rewardMultipliers[multiplierIndex];
     }
 }
